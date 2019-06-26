@@ -12,6 +12,7 @@ to compile in MATLAB type "mex -V -O -largeArrayDims rollingMedian.c"
 
 B = rollingMedian(A, R, C) Performs median filtering of the
 matrix A in two dimensions with minimal edge effects and phase shift.
+
 Inputs
 ------
 A : Input Array
