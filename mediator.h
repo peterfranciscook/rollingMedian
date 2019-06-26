@@ -601,17 +601,25 @@ void medFilt(const void* A, unsigned char* B, size_t M, size_t N, size_t R, size
 	// u : mirror row position of i (?)
 	// v : mirror col position of j (?)
 
-	//size_t sz = sizeof(double);
+	size_t LDA = M * sz;
 	void* uPtr = malloc(sz); // memory location to hold mean in the event of an even window
 	void* vPtr = malloc(sz); // memory location to hold mean in the event of an even window
 	void* wPtr = malloc(sz); // memory location to hold mean in the event of an even window
 	const void* w;
 	const void* x;
 	const void* y;
+
+	// pointers to input array
 	unsigned char* NWPtr = (unsigned char*)A;
-	//unsigned char* SWPtr;
-	//unsigned char* NEPtr;
-	//unsigned char* SEPtr;
+	unsigned char* SWPtr;
+	unsigned char* NEPtr;
+	unsigned char* SEPtr;
+
+	// pointers to output array
+	unsigned char* NWPtrB = (unsigned char*)B;
+	unsigned char* SWPtrB = NWPtrB + (LDA - sz);
+	unsigned char* NEPtrB = NWPtrB + (N - 1) * LDA;
+	unsigned char* SEPtrB = NEPtrB + (LDA - sz);
 
 	// on each iteration we'll work on 4 points simultaneously
 	// (i,j), (M-1-i,j), (i, N-1-j), (M-1-i,N-1-j)
@@ -631,90 +639,103 @@ void medFilt(const void* A, unsigned char* B, size_t M, size_t N, size_t R, size
 		Mediator* mediatorPtrSE = MediatorNew(K, sz, cmp, mean);
 		// ...
 
+		// set pointer positions for each corner
+		size_t u = M - 1;
+		NWPtr = (unsigned char*)A;
+		SWPtr = (unsigned char*)A + u * sz;
+		NEPtr = (unsigned char*)A + ((N - 1) * M) * sz;
+		SEPtr = (unsigned char*)A + ((N - 1) * M + u) * sz;
+
 		// 1.1: initial fill of median heap/buffer(s)
 		for (size_t m = 0; m < R / 2 + (R % 2); m++) {
 			// this is a FIFO queue so need to iterate rows then cols
-			size_t u = M - 1 - m;
 			// 1.1.1 insert J elements into buffer 
 			for (size_t n = 0; n < J; n++) {
-				// k : offset in bytes to element (m,n) of A
-				size_t v = N - 1 - n;
-				size_t k = (n * M + m) * sz;
-				// TODO: make pointer arithmetic better/easier/faster
-				MediatorInsert(mediatorPtrNW, NWPtr + k);
-				k = (n * M + u) * sz;
-				MediatorInsert(mediatorPtrSW, NWPtr + k);
-				k = (v * M + m) * sz;
-				MediatorInsert(mediatorPtrNE, NWPtr + k);
-				k = (v * M + u) * sz;
-				MediatorInsert(mediatorPtrSE, NWPtr + k);
+				MediatorInsert(mediatorPtrNW, NWPtr);
+				MediatorInsert(mediatorPtrSW, SWPtr);
+				MediatorInsert(mediatorPtrNE, NEPtr);
+				MediatorInsert(mediatorPtrSE, SEPtr);
+				NWPtr += LDA;
+				SWPtr += LDA;
+				NEPtr -= LDA;
+				SEPtr -= LDA;
 			}
+			// reset pointer position
+			NWPtr -= (J * LDA - sz);
+			SWPtr -= (J * LDA + sz);
+			NEPtr += (J * LDA + sz);
+			SEPtr += (J * LDA - sz);
 		}
+		//printf("%#010x %#010x %#010x %#010x\n", NWPtr, SWPtr, NEPtr, SEPtr);
 
 		// 1.2: compute median of window around elements (0,j), (M-1,j), (0,N-1-j), (M-1,N-1-j)
-		// k : offset in bytes to element (0,j) of B
-		size_t u = M - 1;
-		size_t v = N - 1 - j;
 		// top left corner
-		size_t k = sz * M * j;
 		w = MediatorMedian(mediatorPtrNW, uPtr);
-		memcpy(B + k, w, sz);
+		memcpy(NWPtrB, w, sz);
+		NWPtrB += sz;
 		// bottom left corner
-		k = sz * (M * j + u);
 		w = MediatorMedian(mediatorPtrSW, uPtr);
-		memcpy(B + k, w, sz);
+		memcpy(SWPtrB, w, sz);
+		SWPtrB -= sz;
 		// top right corner
-		k = sz * M * v;
 		w = MediatorMedian(mediatorPtrNE, uPtr);
-		memcpy(B + k, w, sz);
+		memcpy(NEPtrB, w, sz);
+		NEPtrB += sz;
 		// bottom right corner
-		k = sz * (M * v + u);
 		w = MediatorMedian(mediatorPtrSE, uPtr);
-		memcpy(B + k, w, sz);
-		// ...
+		memcpy(SEPtrB, w, sz);
+		SEPtrB -= sz;
 
 		// 1.3: compute window median for rows 1 to M/2-1
 		for (size_t m = R / 2 + (R % 2); m < M / 2 + R / 2 + (R % 2) - 1; m++) {
 			// 1.3.1: insert A[m,0], A[m,1] ... A[m,J-1] into buffer
-			size_t u = M - 1 - m;
 			for (size_t n = 0; n < J; n++) {
-				// k : offset in bytes to element (m,n) of A
-				size_t v = N - 1 - n;
-				size_t k = (n * M + m) * sz;
-				MediatorInsert(mediatorPtrNW, NWPtr + k);
-				k = (n * M + u) * sz;
-				MediatorInsert(mediatorPtrSW, NWPtr + k);
-				k = (v * M + m) * sz;
-				MediatorInsert(mediatorPtrNE, NWPtr + k);
-				k = (v * M + u) * sz;
-				MediatorInsert(mediatorPtrSE, NWPtr + k);
+				MediatorInsert(mediatorPtrNW, NWPtr);
+				MediatorInsert(mediatorPtrSW, SWPtr);
+				MediatorInsert(mediatorPtrNE, NEPtr);
+				MediatorInsert(mediatorPtrSE, SEPtr);
+				NWPtr += LDA;
+				SWPtr += LDA;
+				NEPtr -= LDA;
+				SEPtr -= LDA;
 			}
+			// reset pointer position
+			NWPtr -= (J * LDA - sz);
+			SWPtr -= (J * LDA + sz);
+			NEPtr += (J * LDA + sz);
+			SEPtr += (J * LDA - sz);
+
 			// 1.3.2: compute median of window around elements (i,j), (M-1-i,j), (i,N-1-j), (M-1-i,N-1-j)
-			// i : row index of B corresponding to centroid of current window
-			//     an additional index shift is applied for even-row-length windows
-			// k : offset in bytes to element (i,j) of B
-			size_t i = m - R / 2 + !(R % 2); // questionable but seems to work on paper
-			u = M - 1 - i;
-			size_t v = N - 1 - j;
 			// top left corner
-			size_t k = sz * (M * j + i);
 			w = MediatorMedian(mediatorPtrNW, uPtr);
-			memcpy(B + k, w, sz);
+			memcpy(NWPtrB, w, sz);
+			NWPtrB += sz;
 			// bottom left corner
-			k = sz * (M * j + u);
 			w = MediatorMedian(mediatorPtrSW, uPtr);
-			memcpy(B + k, w, sz);
+			memcpy(SWPtrB, w, sz);
+			SWPtrB -= sz;
 			// top right corner
-			k = sz * (M * v + i);
 			w = MediatorMedian(mediatorPtrNE, uPtr);
-			memcpy(B + k, w, sz);
+			memcpy(NEPtrB, w, sz);
+			NEPtrB += sz;
 			// bottom right corner
-			k = sz * (M * v + u);
 			w = MediatorMedian(mediatorPtrSE, uPtr);
-			memcpy(B + k, w, sz);
+			memcpy(SEPtrB, w, sz);
+			SEPtrB -= sz;
 		}
+
+		// shift output pointers for next loop
+		size_t m = M / 2 + R / 2 + (R % 2) - 1;
+		size_t lda = m * sz;
+		NWPtrB += (LDA - lda + sz);
+		SWPtrB += (LDA + lda - sz);
+		NEPtrB -= (LDA + lda - sz);
+		SEPtrB -= (LDA - lda + sz);
+
+		// TODO: update pointer arithmetic
 		// 1.4: fill in middle row if needed
 		if (M % 2) {
+			NWPtr = (unsigned char*)A;
 			size_t m = M / 2 + R / 2 + (R % 2) - 1;
 			size_t u = M - 1 - m;
 			// 1.4.1: insert A[m,0], A[m,1] ... A[m,J-1] into buffer
@@ -763,6 +784,7 @@ void medFilt(const void* A, unsigned char* B, size_t M, size_t N, size_t R, size
 		size_t I = R / 2 + i + (R % 2);
 		size_t J = C;
 		size_t K = I * J;
+		size_t lda = I * sz;
 
 		// init and fill 4 mediators
 		Mediator* mediatorPtrNW = MediatorNew(K, sz, cmp, mean);
@@ -771,84 +793,100 @@ void medFilt(const void* A, unsigned char* B, size_t M, size_t N, size_t R, size
 		Mediator* mediatorPtrSE = MediatorNew(K, sz, cmp, mean);
 		// ...
 
+		// set initial 4 pointer positions
+		NWPtr = (unsigned char*)A;
+		SWPtr = NWPtr + LDA - sz;
+		NEPtr = (unsigned char*)A + (N - 1) * LDA;
+		SEPtr = NEPtr + LDA - sz;
+
 		// 2.1: initial fill of median heap/buffer(s)
 		for (size_t n = 0; n < J; n++) {
 			// 2.1.1 insert I elements into buffer
-			size_t v = N - 1 - n;
 			for (size_t m = 0; m < I; m++) {
-				// k : offset in bytes to element (m,n) of A
-				size_t u = M - 1 - m;
-				size_t k = (n * M + m) * sz;
-				MediatorInsert(mediatorPtrNW, NWPtr + k);
-				k = (n * M + u) * sz;
-				MediatorInsert(mediatorPtrSW, NWPtr + k);
-				k = (v * M + m) * sz;
-				MediatorInsert(mediatorPtrNE, NWPtr + k);
-				k = (v * M + u) * sz;
-				MediatorInsert(mediatorPtrSE, NWPtr + k);
+				MediatorInsert(mediatorPtrNW, NWPtr);
+				MediatorInsert(mediatorPtrSW, SWPtr);
+				MediatorInsert(mediatorPtrNE, NEPtr);
+				MediatorInsert(mediatorPtrSE, SEPtr);
+				NWPtr += sz;
+				SWPtr -= sz;
+				NEPtr += sz;
+				SEPtr -= sz;
 			}
+			// reset pointer position
+			NWPtr += (LDA - lda);
+			SWPtr += (LDA + lda);
+			NEPtr -= (LDA + lda);
+			SEPtr -= (LDA - lda);
 		}
+		//printf("%#010x %#010x %#010x %#010x\n", NWPtr, SWPtr, NEPtr, SEPtr);
+		//printf("%#010x %#010x %#010x %#010x\n", NWPtrB, SWPtrB, NEPtrB, SEPtrB);
+
 		// 2.2: compute median of window around elements (i,C/2), (M-1,C/2), (0,N-1-C/2), (M-1,N-1-C/2)
-		size_t j = C / 2;
-		size_t u = M - 1 - i;
-		size_t v = N - 1 - j;
 		// top left corner
-		size_t k = sz * (M * j + i);
 		w = MediatorMedian(mediatorPtrNW, uPtr);
-		memcpy(B + k, w, sz);
+		memcpy(NWPtrB, w, sz);
+		NWPtrB += LDA;
 		// bottom left corner
-		k = sz * (M * j + u);
 		w = MediatorMedian(mediatorPtrSW, uPtr);
-		memcpy(B + k, w, sz);
+		memcpy(SWPtrB, w, sz);
+		SWPtrB += LDA;
 		// top right corner
-		k = sz * (v * M + i);
 		w = MediatorMedian(mediatorPtrNE, uPtr);
-		memcpy(B + k, w, sz);
+		memcpy(NEPtrB, w, sz);
+		NEPtrB -= LDA;
 		// bottom right corner
-		k = sz * (v * M + u);
 		w = MediatorMedian(mediatorPtrSE, uPtr);
-		memcpy(B + k, w, sz);
+		memcpy(SEPtrB, w, sz);
+		SEPtrB -= LDA;
 
 		// 2.3: compute window median for columns C/2 to N/2-1
 		for (size_t n = J; n < N / 2 + C / 2 + (C % 2) - 1; n++) {
-			size_t v = N - 1 - n;
 			for (size_t m = 0; m < I; m++) {
-				// k : offset in bytes to element (m,n) of A
-				size_t u = M - 1 - m;
-				size_t k = (n * M + m) * sz;
-				MediatorInsert(mediatorPtrNW, NWPtr + k);
-				k = (n * M + u) * sz;
-				MediatorInsert(mediatorPtrSW, NWPtr + k);
-				k = (v * M + m) * sz;
-				MediatorInsert(mediatorPtrNE, NWPtr + k);
-				k = (v * M + u) * sz;
-				MediatorInsert(mediatorPtrSE, NWPtr + k);
+				MediatorInsert(mediatorPtrNW, NWPtr);
+				MediatorInsert(mediatorPtrSW, SWPtr);
+				MediatorInsert(mediatorPtrNE, NEPtr);
+				MediatorInsert(mediatorPtrSE, SEPtr);
+				NWPtr += sz;
+				SWPtr -= sz;
+				NEPtr += sz;
+				SEPtr -= sz;
 			}
-			// j : col index of B corresponding to centroid of current window
-			//     an additional index shift is applied for even-row-length windows
-			// k : offset in bytes to element (i,j) of B
-			size_t j = n - C / 2 + !(C % 2);
-			size_t u = M - 1 - i;
-			v = N - 1 - j;
+			// reset pointer position
+			NWPtr += (LDA - lda);
+			SWPtr += (LDA + lda);
+			NEPtr -= (LDA + lda);
+			SEPtr -= (LDA - lda);
+
 			// top left corner
-			size_t k = sz * (M * j + i);
 			w = MediatorMedian(mediatorPtrNW, uPtr);
-			memcpy(B + k, w, sz);
+			memcpy(NWPtrB, w, sz);
+			NWPtrB += LDA;
 			// bottom left corner
-			k = sz * (M * j + u);
 			w = MediatorMedian(mediatorPtrSW, uPtr);
-			memcpy(B + k, w, sz);
+			memcpy(SWPtrB, w, sz);
+			SWPtrB += LDA;
 			// top right corner
-			k = (v * M + i) * sz;
 			w = MediatorMedian(mediatorPtrNE, uPtr);
-			memcpy(B + k, w, sz);
+			memcpy(NEPtrB, w, sz);
+			NEPtrB -= LDA;
 			// bottom right corner
-			k = (v * M + u) * sz;
 			w = MediatorMedian(mediatorPtrSE, uPtr);
-			memcpy(B + k, w, sz);
+			memcpy(SEPtrB, w, sz);
+			SEPtrB -= LDA;
+
 		}
+
+		// shift output pointers for next loop
+		size_t n = N / 2 + C / 2 + (C % 2) - J;
+		NWPtrB -= (LDA * n - sz);
+		SWPtrB -= (LDA * n + sz);
+		NEPtrB += (LDA * n + sz);
+		SEPtrB += (LDA * n - sz);
+
+		// TODO: update pointer arithmetic
 		// 2.4: fill in middle col if needed
 		if (N % 2) {
+			NWPtr = (unsigned char*)A;
 			size_t n = N / 2 + C / 2 + (C % 2) - 1;
 			size_t v = N - 1 - n;
 			for (size_t m = 0; m < I; m++) {
@@ -893,84 +931,110 @@ void medFilt(const void* A, unsigned char* B, size_t M, size_t N, size_t R, size
 	// part 3: filter the middle of the array
 	// init 4 mediators
 	size_t K = R * C;
+	size_t lda = R * sz;
 	Mediator* mediatorPtrNW = MediatorNew(K, sz, cmp, mean);
 	Mediator* mediatorPtrSW = MediatorNew(K, sz, cmp, mean);
 	Mediator* mediatorPtrNE = MediatorNew(K, sz, cmp, mean);
 	Mediator* mediatorPtrSE = MediatorNew(K, sz, cmp, mean);
 	// ...
+
+	// set initial 4 pointer positions
+	NWPtr = (unsigned char*)A;
+	SWPtr = NWPtr + LDA - sz;
+	NEPtr = (unsigned char*)A + (N - 1) * LDA;
+	SEPtr = NEPtr + LDA - sz;
+
 	for (size_t i = R / 2; i < M / 2; i++) {
 		// 3.1: initial fill of median heap/buffer(s)
 		for (size_t n = 0; n < C; n++) {
-			size_t v = N - 1 - n;
 			for (size_t m = i - R / 2; m < (i + R / 2 + (R % 2)); m++) {
-				size_t u = M - 1 - m;
-				size_t k = (n * M + m) * sz;
-				MediatorInsert(mediatorPtrNW, NWPtr + k);
-				k = (n * M + u) * sz;
-				MediatorInsert(mediatorPtrSW, NWPtr + k);
-				k = (v * M + m) * sz;
-				MediatorInsert(mediatorPtrNE, NWPtr + k);
-				k = (v * M + u) * sz;
-				MediatorInsert(mediatorPtrSE, NWPtr + k);
+				MediatorInsert(mediatorPtrNW, NWPtr);
+				MediatorInsert(mediatorPtrSW, SWPtr);
+				MediatorInsert(mediatorPtrNE, NEPtr);
+				MediatorInsert(mediatorPtrSE, SEPtr);
+				NWPtr += sz;
+				SWPtr -= sz;
+				NEPtr += sz;
+				SEPtr -= sz;
 			}
+			// reset pointer position
+			NWPtr += (LDA - lda);
+			SWPtr += (LDA + lda);
+			NEPtr -= (LDA + lda);
+			SEPtr -= (LDA - lda);
 		}
 		// 3.2: compute median of window around elements (i,j), (M-1-1,j), (i,N-1-j), (M-1-1,N-1-j)
-		size_t j = C / 2;
-		size_t u = M - 1 - i;
-		size_t v = N - 1 - j;
 		// top right corner
-		size_t k = (M * j + i) * sz;
 		w = MediatorMedian(mediatorPtrNW, uPtr);
-		memcpy(B + k, w, sz);
+		memcpy(NWPtrB, w, sz);
+		NWPtrB += LDA;
 		// bottom left corner
-		k = (j * M + u) * sz;
 		w = MediatorMedian(mediatorPtrSW, uPtr);
-		memcpy(B + k, w, sz);
+		memcpy(SWPtrB, w, sz);
+		SWPtrB += LDA;
 		// top right corner
-		k = (v * M + i) * sz;
 		w = MediatorMedian(mediatorPtrNE, uPtr);
-		memcpy(B + k, w, sz);
+		memcpy(NEPtrB, w, sz);
+		NEPtrB -= LDA;
 		// bottom right corner
-		k = (v * M + u) * sz;
 		w = MediatorMedian(mediatorPtrSE, uPtr);
-		memcpy(B + k, w, sz);
+		memcpy(SEPtrB, w, sz);
+		SEPtrB -= LDA;
 
 		// 3.3: compute window median for columns C/2 to N/2-1
 		for (size_t n = C; n < N / 2 + C / 2 + (C % 2) - 1; n++) {
-			size_t v = N - 1 - n;
 			for (size_t m = i - R / 2; m < (i + R / 2 + (R % 2)); m++) {
-				size_t u = M - 1 - m;
-				size_t k = (n * M + m) * sz;
-				MediatorInsert(mediatorPtrNW, NWPtr + k);
-				k = (n * M + u) * sz;
-				MediatorInsert(mediatorPtrSW, NWPtr + k);
-				k = (v * M + m) * sz;
-				MediatorInsert(mediatorPtrNE, NWPtr + k);
-				k = (v * M + u) * sz;
-				MediatorInsert(mediatorPtrSE, NWPtr + k);
+				MediatorInsert(mediatorPtrNW, NWPtr);
+				MediatorInsert(mediatorPtrSW, SWPtr);
+				MediatorInsert(mediatorPtrNE, NEPtr);
+				MediatorInsert(mediatorPtrSE, SEPtr);
+				NWPtr += sz;
+				SWPtr -= sz;
+				NEPtr += sz;
+				SEPtr -= sz;
 			}
-			size_t j = n - C / 2 + !(C % 2);
-			size_t u = M - 1 - i;
-			v = N - 1 - j;
-			// top left corner
-			size_t k = (M * j + i) * sz;
-			w = MediatorMedian(mediatorPtrNW, uPtr);
-			memcpy(B + k, w, sz);
-			// bottom left corner
-			k = (j * M + u) * sz;
-			w = MediatorMedian(mediatorPtrSW, uPtr);
-			memcpy(B + k, w, sz);
+			// reset pointer position
+			NWPtr += (LDA - lda);
+			SWPtr += (LDA + lda);
+			NEPtr -= (LDA + lda);
+			SEPtr -= (LDA - lda);
+
 			// top right corner
-			k = (v * M + i) * sz;
+			w = MediatorMedian(mediatorPtrNW, uPtr);
+			memcpy(NWPtrB, w, sz);
+			NWPtrB += LDA;
+			// bottom left corner
+			w = MediatorMedian(mediatorPtrSW, uPtr);
+			memcpy(SWPtrB, w, sz);
+			SWPtrB += LDA;
+			// top right corner
 			w = MediatorMedian(mediatorPtrNE, uPtr);
-			memcpy(B + k, w, sz);
+			memcpy(NEPtrB, w, sz);
+			NEPtrB -= LDA;
 			// bottom right corner
-			k = (v * M + u) * sz;
 			w = MediatorMedian(mediatorPtrSE, uPtr);
-			memcpy(B + k, w, sz);
+			memcpy(SEPtrB, w, sz);
+			SEPtrB -= LDA;
 		}
+		size_t n = N / 2 + C / 2 + (C % 2) - 1;
+
+		// reset pointer position for next loop
+		NWPtr -= (LDA * n - sz);
+		SWPtr -= (LDA * n + sz);
+		NEPtr += (LDA * n + sz);
+		SEPtr += (LDA * n - sz);
+
+		// shift output pointers for next loop
+		n = N / 2 + C / 2 + (C % 2) - C;
+		NWPtrB -= (LDA * n - sz);
+		SWPtrB -= (LDA * n + sz);
+		NEPtrB += (LDA * n + sz);
+		SEPtrB += (LDA * n - sz);
+
+		// TODO: update pointer arithmetic
 		// 3.4: fill in middle col if needed
 		if (N % 2) {
+			NWPtr = (unsigned char*)A;
 			size_t n = N / 2 + C / 2 + (C % 2) - 1;
 			size_t v = N - 1 - n;
 			for (size_t m = i - R / 2; m < (i + R / 2 + (R % 2)); m++) {
@@ -1002,8 +1066,10 @@ void medFilt(const void* A, unsigned char* B, size_t M, size_t N, size_t R, size
 			memcpy(B + k, wPtr, sz);
 		}
 	}
+	// TODO: update pointer arithmetic
 	// 3.5: fill in middle row if needed
 	if (M % 2) {
+		NWPtr = (unsigned char*)A;
 		size_t i = M / 2;
 		// 3.5.1: initial fill of median heap/buffer(s)
 		for (size_t n = 0; n < C; n++) {
