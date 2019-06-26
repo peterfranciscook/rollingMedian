@@ -725,12 +725,12 @@ void medFilt(const void* A, unsigned char* B, size_t M, size_t N, size_t R, size
 		}
 
 		// shift output pointers for next loop
-		size_t m = M / 2 + R / 2 + (R % 2) - 1;
+		size_t m = M / 2;
 		size_t lda = m * sz;
-		NWPtrB += (LDA - lda + sz);
-		SWPtrB += (LDA + lda - sz);
-		NEPtrB -= (LDA + lda - sz);
-		SEPtrB -= (LDA - lda + sz);
+		NWPtrB += (LDA - lda);
+		SWPtrB += (LDA + lda);
+		NEPtrB -= (LDA + lda);
+		SEPtrB -= (LDA - lda);
 
 		// TODO: update pointer arithmetic
 		// 1.4: fill in middle row if needed
